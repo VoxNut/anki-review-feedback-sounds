@@ -1,3 +1,11 @@
 __pycache__/
 *.py[cod]
-sounds/*.wav
+
+# Keep user-provided audio local. The empty folder markers below are tracked.
+sounds/*
+!sounds/again/
+!sounds/good/
+sounds/again/*
+sounds/good/*
+!sounds/again/.gitkeep
+!sounds/good/.gitkeep
