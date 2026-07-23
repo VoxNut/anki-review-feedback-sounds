@@ -1,6 +1,5 @@
 __pycache__/
 *.py[cod]
-.sound-cache/
 
 # Keep user-provided audio local. The empty folder markers below are tracked.
 sounds/*

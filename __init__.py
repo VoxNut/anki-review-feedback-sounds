@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import random
-import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,7 +26,6 @@ from aqt.sound import av_player
 
 ADDON_DIR = Path(__file__).parent
 SOUNDS_DIR = ADDON_DIR / "sounds"
-CACHE_DIR = ADDON_DIR / ".sound-cache"
 SOUND_FOLDERS = {
     "again": SOUNDS_DIR / "again",
     "good": SOUNDS_DIR / "good",
@@ -44,8 +41,6 @@ SUPPORTED_AUDIO_EXTENSIONS = {
     ".spx",
     ".wav",
 }
-SILENCE_THRESHOLD = 0.015
-EDGE_PADDING_SECONDS = 0.012
 
 
 @dataclass
@@ -59,11 +54,10 @@ _pending_sound: PendingSound | None = None
 
 
 def ensure_sound_folders() -> None:
-    """Create user-managed sound folders and the internal cache."""
+    """Create the two user-managed sound folders without touching their files."""
     try:
         for folder in SOUND_FOLDERS.values():
             folder.mkdir(parents=True, exist_ok=True)
-        CACHE_DIR.mkdir(exist_ok=True)
     except OSError as error:
         # Review should remain usable if the add-on directory is not writable.
         print(f"Review Feedback Sounds: unable to create sound folders: {error}")
@@ -85,83 +79,6 @@ def available_sounds(folder_key: str) -> list[Path]:
 def random_sound(folder_key: str) -> Path | None:
     sounds = available_sounds(folder_key)
     return random.choice(sounds) if sounds else None
-
-
-def _frame_peak(frame: bytes, sample_width: int) -> float:
-    """Return the loudest normalized sample in a single PCM WAV frame."""
-    if sample_width == 1:
-        return max(abs(sample - 128) for sample in frame) / 127
-
-    max_value = (1 << (sample_width * 8 - 1)) - 1
-    return max(
-        abs(int.from_bytes(frame[offset : offset + sample_width], "little", signed=True))
-        / max_value
-        for offset in range(0, len(frame), sample_width)
-    )
-
-
-def trimmed_wav_path(source: Path) -> Path:
-    """Return a cached WAV with quiet leading and trailing frames removed.
-
-    The user's original sound is never changed. Non-WAV audio is returned
-    unchanged because Python's standard library cannot decode those formats.
-    """
-    if source.suffix.lower() != ".wav":
-        return source
-
-    try:
-        metadata = source.stat()
-        cache_key = (
-            f"{source.resolve()}:{metadata.st_mtime_ns}:{metadata.st_size}".encode()
-        )
-        destination = CACHE_DIR / f"{hashlib.sha256(cache_key).hexdigest()}.wav"
-        if destination.is_file():
-            return destination
-
-        with wave.open(str(source), "rb") as input_audio:
-            if input_audio.getcomptype() != "NONE":
-                return source
-            channels = input_audio.getnchannels()
-            sample_width = input_audio.getsampwidth()
-            frame_rate = input_audio.getframerate()
-            audio_frames = input_audio.readframes(input_audio.getnframes())
-
-        frame_width = channels * sample_width
-        if not audio_frames or frame_width <= 0:
-            return source
-
-        frame_count = len(audio_frames) // frame_width
-        audible_frames = [
-            index
-            for index in range(frame_count)
-            if _frame_peak(
-                audio_frames[index * frame_width : (index + 1) * frame_width],
-                sample_width,
-            )
-            >= SILENCE_THRESHOLD
-        ]
-        if not audible_frames:
-            return source
-
-        edge_padding = int(frame_rate * EDGE_PADDING_SECONDS)
-        first_frame = max(0, audible_frames[0] - edge_padding)
-        last_frame = min(frame_count, audible_frames[-1] + edge_padding + 1)
-        if first_frame == 0 and last_frame == frame_count:
-            return source
-
-        trimmed_frames = audio_frames[first_frame * frame_width : last_frame * frame_width]
-        temporary_destination = destination.with_suffix(".tmp")
-        with wave.open(str(temporary_destination), "wb") as output_audio:
-            output_audio.setnchannels(channels)
-            output_audio.setsampwidth(sample_width)
-            output_audio.setframerate(frame_rate)
-            output_audio.writeframes(trimmed_frames)
-        temporary_destination.replace(destination)
-        return destination
-    except (OSError, wave.Error, ValueError):
-        # Fall back to the original audio if it is currently being copied or
-        # is not a standard PCM WAV file.
-        return source
 
 
 def good_button_ease(reviewer: Any, card: Any) -> int:
@@ -196,7 +113,7 @@ def on_did_answer_card(reviewer: Any, card: Any, ease: int) -> None:
         return
 
     if sound_path := random_sound(folder_key):
-        pending = PendingSound(trimmed_wav_path(sound_path))
+        pending = PendingSound(sound_path)
         _pending_sound = pending
         # If this answer ends the review session, no question audio will be
         # requested. Play the feedback shortly afterward instead.
@@ -228,7 +145,7 @@ def test_random_sound(folder_key: str, parent: QDialog) -> None:
             f"Add a supported audio file to:\n{SOUND_FOLDERS[folder_key]}",
         )
         return
-    av_player.play_file(str(trimmed_wav_path(sound_path)))
+    av_player.play_file(str(sound_path))
 
 
 def add_folder_row(layout: QVBoxLayout, folder_key: str, parent: QDialog) -> None:
@@ -266,7 +183,6 @@ def show_settings() -> None:
     root.addWidget(
         QLabel(
             "Supported formats: WAV, MP3, OGG, Opus, FLAC, M4A, OGA, SPX, and 3GP. "
-            "WAV files have quiet leading and trailing silence removed automatically. "
             "An empty folder simply plays no feedback sound."
         )
     )

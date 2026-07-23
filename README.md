@@ -20,10 +20,6 @@ Supported formats: WAV, MP3, OGG, Opus, FLAC, M4A, OGA, SPX, and 3GP.
 
 In Anki, open **Tools > Review Feedback Sound Folders...** to open either folder or test a randomly selected sound.
 
-## Automatic silence trimming
-
-For standard PCM WAV files, the add-on automatically removes quiet silence from the beginning and end before playing the sound. It keeps the original file untouched and plays a cached trimmed copy instead. MP3, OGG, and other compressed formats continue to play normally, but are not trimmed because Anki does not include a general-purpose audio decoder for add-ons.
-
 ## Install from this repository
 
 For local development, place this anki_review_feedback_sounds directory directly in Anki's addons21 folder and restart Anki. In this workspace it is already installed at:
