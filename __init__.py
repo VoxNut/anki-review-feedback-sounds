@@ -11,6 +11,7 @@ from anki.sound import SoundOrVideoTag
 from aqt import gui_hooks, mw
 from aqt.qt import (
     QAction,
+    QCheckBox,
     QDesktopServices,
     QDialog,
     QDialogButtonBox,
@@ -43,7 +44,10 @@ SUPPORTED_AUDIO_EXTENSIONS = {
     ".spx",
     ".wav",
 }
-DEFAULT_CONFIG = {"feedback_volume": 100}
+DEFAULT_CONFIG = {
+    "enabled": True,
+    "feedback_volume": 100,
+}
 
 
 @dataclass
@@ -57,6 +61,7 @@ _pending_sound: PendingSound | None = None
 _queued_feedback_tag_ids: set[int] = set()
 _feedback_player: Any | None = None
 _feedback_player_original_volume: float | None = None
+_feedback_enabled_cache: bool | None = None
 _feedback_volume_cache: int | None = None
 
 
@@ -102,6 +107,25 @@ def get_feedback_volume() -> int:
     return _feedback_volume_cache
 
 
+def get_feedback_enabled() -> bool:
+    global _feedback_enabled_cache
+    if _feedback_enabled_cache is not None:
+        return _feedback_enabled_cache
+
+    config = mw.addonManager.getConfig(__name__) or {}
+    value = config.get("enabled", DEFAULT_CONFIG["enabled"])
+    if isinstance(value, str):
+        _feedback_enabled_cache = value.strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+    else:
+        _feedback_enabled_cache = bool(value)
+    return _feedback_enabled_cache
+
+
 def save_feedback_volume(volume: int) -> None:
     global _feedback_volume_cache
     _feedback_volume_cache = max(0, min(100, int(volume)))
@@ -111,6 +135,23 @@ def save_feedback_volume(volume: int) -> None:
         mw.addonManager.writeConfig(__name__, config)
     elif hasattr(mw.addonManager, "setConfig"):
         mw.addonManager.setConfig(__name__, config)
+
+
+def save_feedback_enabled(enabled: bool) -> None:
+    global _feedback_enabled_cache, _pending_sound
+    _feedback_enabled_cache = bool(enabled)
+    config = mw.addonManager.getConfig(__name__) or {}
+    config["enabled"] = _feedback_enabled_cache
+    if hasattr(mw.addonManager, "writeConfig"):
+        mw.addonManager.writeConfig(__name__, config)
+    elif hasattr(mw.addonManager, "setConfig"):
+        mw.addonManager.setConfig(__name__, config)
+
+    if not _feedback_enabled_cache:
+        _pending_sound = None
+    if _feedback_player is not None:
+        active_volume = get_feedback_volume() if _feedback_enabled_cache else 0
+        _apply_feedback_volume_to_current_player(active_volume)
 
 
 def _register_feedback_tag(tag: SoundOrVideoTag) -> None:
@@ -197,6 +238,9 @@ def on_did_answer_card(reviewer: Any, card: Any, ease: int) -> None:
     """Pick a feedback sound and remember it until the reviewer starts the next card."""
     global _pending_sound
 
+    if not get_feedback_enabled():
+        return
+
     folder_key: str | None = None
     if ease == 1:
         folder_key = "again"
@@ -218,6 +262,9 @@ def on_will_play_question_sounds(card: Any, sounds: list[Any]) -> None:
     """Put feedback before the next card's audio so it is not interrupted."""
     global _pending_sound
     if _pending_sound is None:
+        return
+    if not get_feedback_enabled():
+        _pending_sound = None
         return
 
     pending = _pending_sound
@@ -247,7 +294,8 @@ def on_av_player_will_play(tag: Any) -> None:
 
     _feedback_player = player
     _feedback_player_original_volume = original_volume
-    _apply_feedback_volume_to_current_player(get_feedback_volume())
+    active_volume = get_feedback_volume() if get_feedback_enabled() else 0
+    _apply_feedback_volume_to_current_player(active_volume)
 
 
 def on_av_player_did_end_playing(player: Any) -> None:
@@ -261,6 +309,14 @@ def open_sound_folder(folder_key: str) -> None:
 
 
 def test_random_sound(folder_key: str, parent: QDialog) -> None:
+    if not get_feedback_enabled():
+        QMessageBox.information(
+            parent,
+            "Review Feedback Sounds",
+            "Feedback sounds are disabled. Enable them first to test a sound.",
+        )
+        return
+
     sound_path = random_sound(folder_key)
     if sound_path is None:
         QMessageBox.information(
@@ -307,6 +363,14 @@ def add_volume_control(layout: QVBoxLayout) -> None:
     layout.addLayout(row)
 
 
+def add_enabled_control(layout: QVBoxLayout) -> None:
+    checkbox = QCheckBox("Enable feedback sounds")
+    checkbox.setChecked(get_feedback_enabled())
+    checkbox.setToolTip("Turn Again and Good feedback sounds on or off immediately.")
+    checkbox.toggled.connect(save_feedback_enabled)
+    layout.addWidget(checkbox)
+
+
 def show_settings() -> None:
     ensure_sound_folders()
 
@@ -322,6 +386,7 @@ def show_settings() -> None:
             "from the matching folder."
         )
     )
+    add_enabled_control(root)
     add_volume_control(root)
     add_folder_row(root, "again", dialog)
     add_folder_row(root, "good", dialog)

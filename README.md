@@ -20,6 +20,10 @@ Supported formats: WAV, MP3, OGG, Opus, FLAC, M4A, OGA, SPX, and 3GP.
 
 In Anki, open **Tools > Review Feedback Sound Folders...** to open either folder or test a randomly selected sound.
 
+## Enable or disable instantly
+
+Open **Tools > Review Feedback Sound Folders...** and toggle **Enable feedback sounds**. The setting is saved immediately and affects the next Again or Good rating without restarting Anki. Disabling feedback also skips folder scanning during reviews.
+
 ## Feedback volume
 
 Open **Tools > Review Feedback Sound Folders...** and move **Feedback volume**. The setting saves as you drag the slider, so it affects future feedback sounds immediately without restarting Anki. It is relative to Anki's normal audio volume: 100% keeps the same volume, 50% plays feedback at half volume, and 0% mutes feedback while preserving its timing.
