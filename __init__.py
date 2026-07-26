@@ -18,8 +18,10 @@ from aqt.qt import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSlider,
     QUrl,
     QVBoxLayout,
+    Qt,
 )
 from aqt.sound import av_player
 
@@ -41,6 +43,7 @@ SUPPORTED_AUDIO_EXTENSIONS = {
     ".spx",
     ".wav",
 }
+DEFAULT_CONFIG = {"feedback_volume": 100}
 
 
 @dataclass
@@ -51,6 +54,10 @@ class PendingSound:
 
 
 _pending_sound: PendingSound | None = None
+_queued_feedback_tag_ids: set[int] = set()
+_feedback_player: Any | None = None
+_feedback_player_original_volume: float | None = None
+_feedback_volume_cache: int | None = None
 
 
 def ensure_sound_folders() -> None:
@@ -81,6 +88,93 @@ def random_sound(folder_key: str) -> Path | None:
     return random.choice(sounds) if sounds else None
 
 
+def get_feedback_volume() -> int:
+    global _feedback_volume_cache
+    if _feedback_volume_cache is not None:
+        return _feedback_volume_cache
+
+    config = mw.addonManager.getConfig(__name__) or {}
+    try:
+        volume = int(config.get("feedback_volume", 100))
+    except (TypeError, ValueError):
+        volume = DEFAULT_CONFIG["feedback_volume"]
+    _feedback_volume_cache = max(0, min(100, volume))
+    return _feedback_volume_cache
+
+
+def save_feedback_volume(volume: int) -> None:
+    global _feedback_volume_cache
+    _feedback_volume_cache = max(0, min(100, int(volume)))
+    config = mw.addonManager.getConfig(__name__) or {}
+    config["feedback_volume"] = _feedback_volume_cache
+    if hasattr(mw.addonManager, "writeConfig"):
+        mw.addonManager.writeConfig(__name__, config)
+    elif hasattr(mw.addonManager, "setConfig"):
+        mw.addonManager.setConfig(__name__, config)
+
+
+def _register_feedback_tag(tag: SoundOrVideoTag) -> None:
+    # Only one feedback sound is normally queued. The size guard prevents
+    # stale IDs accumulating if Anki has no available player for a file.
+    if len(_queued_feedback_tag_ids) >= 20:
+        _queued_feedback_tag_ids.clear()
+    _queued_feedback_tag_ids.add(id(tag))
+
+
+def _play_feedback_file(path: str) -> None:
+    tag = SoundOrVideoTag(filename=path)
+    _register_feedback_tag(tag)
+    av_player.play_tags([tag])
+
+
+def _get_player_volume(player: Any) -> float | None:
+    try:
+        return float(player.get_property("volume"))
+    except Exception:
+        pass
+    try:
+        return float(player.volume)
+    except Exception:
+        pass
+    return None
+
+
+def _set_player_volume(player: Any, volume: float) -> bool:
+    target_vol = max(0.0, min(100.0, volume))
+    try:
+        player.command("set_property", "volume", target_vol)
+        return True
+    except Exception:
+        pass
+    try:
+        player.set_property("volume", target_vol)
+        return True
+    except Exception:
+        pass
+    try:
+        player.volume = target_vol
+        return True
+    except Exception:
+        pass
+    return False
+
+
+def _restore_feedback_player_volume() -> None:
+    global _feedback_player, _feedback_player_original_volume
+    if _feedback_player is not None and _feedback_player_original_volume is not None:
+        _set_player_volume(_feedback_player, _feedback_player_original_volume)
+    _feedback_player = None
+    _feedback_player_original_volume = None
+
+
+def _apply_feedback_volume_to_current_player(volume: int) -> None:
+    if _feedback_player is not None and _feedback_player_original_volume is not None:
+        _set_player_volume(
+            _feedback_player,
+            _feedback_player_original_volume * volume / 100,
+        )
+
+
 def good_button_ease(reviewer: Any, card: Any) -> int:
     """Return the current numerical ease used by Anki's Good button.
 
@@ -96,7 +190,7 @@ def clear_pending_sound_if_needed(expected: PendingSound) -> None:
     global _pending_sound
     if _pending_sound is expected:
         _pending_sound = None
-        av_player.play_file(str(expected.path))
+        _play_feedback_file(str(expected.path))
 
 
 def on_did_answer_card(reviewer: Any, card: Any, ease: int) -> None:
@@ -128,7 +222,37 @@ def on_will_play_question_sounds(card: Any, sounds: list[Any]) -> None:
 
     pending = _pending_sound
     _pending_sound = None
-    sounds.insert(0, SoundOrVideoTag(filename=str(pending.path)))
+    tag = SoundOrVideoTag(filename=str(pending.path))
+    _register_feedback_tag(tag)
+    sounds.insert(0, tag)
+
+
+def on_av_player_will_play(tag: Any) -> None:
+    """Temporarily set mpv's volume while one of our feedback sounds plays."""
+    global _feedback_player, _feedback_player_original_volume
+    tag_id = id(tag)
+    if tag_id not in _queued_feedback_tag_ids:
+        # This is the hot path for ordinary card audio: one in-memory set
+        # lookup, with no config reads, filesystem calls, or player commands.
+        if _feedback_player is not None:
+            _restore_feedback_player_volume()
+        return
+    _queued_feedback_tag_ids.discard(tag_id)
+    _restore_feedback_player_volume()
+
+    player = av_player.current_player
+    original_volume = _get_player_volume(player)
+    if original_volume is None:
+        return
+
+    _feedback_player = player
+    _feedback_player_original_volume = original_volume
+    _apply_feedback_volume_to_current_player(get_feedback_volume())
+
+
+def on_av_player_did_end_playing(player: Any) -> None:
+    if player is _feedback_player:
+        _restore_feedback_player_volume()
 
 
 def open_sound_folder(folder_key: str) -> None:
@@ -145,7 +269,7 @@ def test_random_sound(folder_key: str, parent: QDialog) -> None:
             f"Add a supported audio file to:\n{SOUND_FOLDERS[folder_key]}",
         )
         return
-    av_player.play_file(str(sound_path))
+    _play_feedback_file(str(sound_path))
 
 
 def add_folder_row(layout: QVBoxLayout, folder_key: str, parent: QDialog) -> None:
@@ -159,6 +283,27 @@ def add_folder_row(layout: QVBoxLayout, folder_key: str, parent: QDialog) -> Non
     test_button.clicked.connect(lambda: test_random_sound(folder_key, parent))
     row.addWidget(open_button)
     row.addWidget(test_button)
+    layout.addLayout(row)
+
+
+def add_volume_control(layout: QVBoxLayout) -> None:
+    row = QHBoxLayout()
+    label = QLabel()
+    slider = QSlider(Qt.Orientation.Horizontal)
+    slider.setRange(0, 100)
+    initial_volume = get_feedback_volume()
+    slider.setValue(initial_volume)
+    slider.setToolTip("Relative volume for Again and Good feedback sounds.")
+    label.setText(f"Feedback volume: {initial_volume}%")
+
+    def update_volume(value: int) -> None:
+        label.setText(f"Feedback volume: {value}%")
+        save_feedback_volume(value)
+        _apply_feedback_volume_to_current_player(value)
+
+    slider.valueChanged.connect(update_volume)
+    row.addWidget(label)
+    row.addWidget(slider)
     layout.addLayout(row)
 
 
@@ -177,6 +322,7 @@ def show_settings() -> None:
             "from the matching folder."
         )
     )
+    add_volume_control(root)
     add_folder_row(root, "again", dialog)
     add_folder_row(root, "good", dialog)
 
@@ -201,4 +347,6 @@ def add_menu_item() -> None:
 ensure_sound_folders()
 gui_hooks.reviewer_did_answer_card.append(on_did_answer_card)
 gui_hooks.reviewer_will_play_question_sounds.append(on_will_play_question_sounds)
+gui_hooks.av_player_will_play.append(on_av_player_will_play)
+gui_hooks.av_player_did_end_playing.append(on_av_player_did_end_playing)
 add_menu_item()
