@@ -26,7 +26,11 @@ Open **Tools > Review Feedback Sound Folders...** and toggle **Enable feedback s
 
 ## Feedback volume
 
-Open **Tools > Review Feedback Sound Folders...** and move **Feedback volume**. The setting saves as you drag the slider, so it affects future feedback sounds immediately without restarting Anki. It is relative to Anki's normal audio volume: 100% keeps the same volume, 50% plays feedback at half volume, and 0% mutes feedback while preserving its timing.
+Open **Tools > Review Feedback Sound Folders...** and move **Feedback volume**. The setting saves as you drag the slider and affects feedback immediately without restarting Anki. The add-on uses a dedicated audio output, so changing this slider never changes card audio volume.
+
+## Card-review performance
+
+Feedback plays asynchronously on a dedicated media player. It is not added to Anki's question or answer audio queue, and the add-on installs no hooks on card flips or normal card-audio playback.
 
 ## Install from this repository
 
