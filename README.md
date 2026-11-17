@@ -18,15 +18,15 @@ Each time you press **Again** or **Good**, the add-on randomly selects one suppo
 
 Supported formats: WAV, MP3, OGG, Opus, FLAC, M4A, OGA, SPX, and 3GP.
 
-In Anki, open **Tools > Review Feedback Sound Folders...** to open either folder or test a randomly selected sound.
+In Anki, open **Tools > Review Feedback Sounds...** to open either folder or test a randomly selected sound.
 
 ## Enable or disable instantly
 
-Open **Tools > Review Feedback Sound Folders...** and toggle **Enable feedback sounds**. The setting is saved immediately and affects the next Again or Good rating without restarting Anki. Disabling feedback also skips folder scanning during reviews.
+Open **Tools > Review Feedback Sounds...** and toggle **Enable feedback sounds**. The setting is saved immediately and affects the next Again or Good rating without restarting Anki. Disabling feedback also skips folder scanning during reviews.
 
 ## Feedback volume
 
-Open **Tools > Review Feedback Sound Folders...** and move **Feedback volume**. The setting saves as you drag the slider and affects feedback immediately without restarting Anki. The add-on uses a dedicated audio output, so changing this slider never changes card audio volume.
+Open **Tools > Review Feedback Sounds...** and move **Feedback volume**. The setting saves as you drag the slider and affects feedback immediately without restarting Anki. The add-on uses a dedicated audio output, so changing this slider never changes card audio volume.
 
 ## Card-review performance
 

@@ -272,7 +272,7 @@ def show_settings() -> None:
     ensure_sound_folders()
 
     dialog = QDialog(mw)
-    dialog.setWindowTitle("Review Feedback Sound Folders")
+    dialog.setWindowTitle("Review Feedback Sounds")
     dialog.setMinimumWidth(760)
 
     root = QVBoxLayout(dialog)
@@ -301,7 +301,7 @@ def show_settings() -> None:
 
 
 def add_menu_item() -> None:
-    action = QAction("Review Feedback Sound Folders...", mw)
+    action = QAction("Review Feedback Sounds...", mw)
     action.triggered.connect(show_settings)
     mw.form.menuTools.addAction(action)
 
